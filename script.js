@@ -270,20 +270,12 @@ for (let i = 0; i < uvAttr.count; i++) {
 
 uvAttr.needsUpdate = true;
 
-    const mat = new THREE.MeshPhysicalMaterial({
-      map: videoTexture,
-      side: THREE.DoubleSide,
-    });
+    const mat = new THREE.MeshBasicMaterial({
+     map: videoTexture,
+     side: THREE.DoubleSide,
+   });
 
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-
-    const edgeGeo = new THREE.EdgesGeometry(geo);
-    const edgeMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08 });
-    const edges = new THREE.LineSegments(edgeGeo, edgeMat);
-    mesh.add(edges);
-
     return mesh;
   }
 
@@ -306,11 +298,9 @@ uvAttr.needsUpdate = true;
   }
 
   update(dt, handPoints, explodeForce) {
-    this.floatPhase += dt * this.floatSpeed;
-    const floatOffset = Math.sin(this.floatPhase) * this.floatAmp;
 
     const targetX = this.home.x;
-    const targetY = this.home.y + floatOffset;
+    const targetY = this.home.y;
     const targetZ = this.home.z;
 
     const force = { x: 0, y: 0, z: 0 };
@@ -357,9 +347,9 @@ uvAttr.needsUpdate = true;
     const dispZ = this.pos.z - this.home.z;
     const dispMag = Math.sqrt(dispX * dispX + dispY * dispY + dispZ * dispZ);
 
-    const targetRotX = this.homeRot.x + dispY * 0.35 + dispZ * 0.12;
-    const targetRotY = this.homeRot.y + dispX * -0.35 + dispZ * 0.1;
-    const targetRotZ = this.homeRot.z + dispX * 0.15 - dispY * 0.15;
+   const targetRotX = this.homeRot.x + dispY * 0.12;
+   const targetRotY = this.homeRot.y - dispX * 0.12;
+   const targetRotZ = 0;
 
     const rax = (targetRotX - this.rot.x) * CONFIG.ROT_SPRING_STIFFNESS;
     const ray = (targetRotY - this.rot.y) * CONFIG.ROT_SPRING_STIFFNESS;
@@ -377,7 +367,6 @@ uvAttr.needsUpdate = true;
     this.mesh.rotation.set(this.rot.x, this.rot.y, this.rot.z);
 
     const proximity = Math.min(dispMag / 2.5, 1);
-    this.mesh.material.clearcoat = 0.6 + proximity * 0.3;
   }
 }
 
@@ -429,22 +418,6 @@ function buildWallProgressively(onComplete) {
   addBatch();
 }
 
-function randomizeLayout() {
-  tiles.forEach((tile) => {
-    const cellW = CONFIG.WALL_WIDTH / CONFIG.GRID_COLS;
-    const cellH = CONFIG.WALL_HEIGHT / CONFIG.GRID_ROWS;
-    const gx = Math.random() * CONFIG.GRID_COLS;
-    const gy = Math.random() * CONFIG.GRID_ROWS;
-    tile.home.x = (gx - CONFIG.GRID_COLS / 2) * cellW;
-    tile.home.y = (gy - CONFIG.GRID_ROWS / 2) * cellH;
-    tile.home.z = (Math.random() - 0.5) * CONFIG.DEPTH_RANGE;
-    tile.homeRot.set(
-      (Math.random() - 0.5) * 0.6,
-      (Math.random() - 0.5) * 0.7,
-      (Math.random() - 0.5) * 0.4
-    );
-  });
-}
 
 // ---------------------------------------------------------------------
 // EXPLODE / REGROUP
@@ -671,9 +644,6 @@ function animate(now) {
   for (let i = 0; i < tiles.length; i++) {
     tiles[i].update(dt, handPoints, explodeAmount);
   }
-
-  tileGroup.rotation.y = Math.sin(state.time * 0.05) * 0.02;
-  tileGroup.rotation.x = Math.cos(state.time * 0.04) * 0.012;
 
   if (videoTexture) videoTexture.needsUpdate = true;
 
