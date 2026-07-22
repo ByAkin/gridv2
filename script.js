@@ -218,12 +218,9 @@ class Tile {
     const cellW = CONFIG.WALL_WIDTH / CONFIG.GRID_COLS;
     const cellH = CONFIG.WALL_HEIGHT / CONFIG.GRID_ROWS;
 
-    const jitterX = (Math.random() - 0.5) * cellW * 0.5;
-    const jitterY = (Math.random() - 0.5) * cellH * 0.5;
-
-    const homeX = (gridX - CONFIG.GRID_COLS / 2 + 0.5) * cellW + jitterX;
-    const homeY = (gridY - CONFIG.GRID_ROWS / 2 + 0.5) * cellH + jitterY;
-    const homeZ = (Math.random() - 0.5) * CONFIG.DEPTH_RANGE;
+   const homeX = (gridX - CONFIG.GRID_COLS / 2 + 0.5) * cellW;
+   const homeY = (gridY - CONFIG.GRID_ROWS / 2 + 0.5) * cellH;
+   const homeZ = 0;
 
     this.home = new THREE.Vector3(homeX, homeY, homeZ);
     this.pos = this.home.clone();
@@ -252,41 +249,44 @@ class Tile {
     this.width = w;
     this.height = h;
 
-    this.uvOffsetX = Math.random() * 0.75;
-    this.uvOffsetY = Math.random() * 0.75;
-    this.uvScale = 0.15 + Math.random() * 0.2;
+// Each tile displays its own part of the webcam
+this.uvOffsetX = gridX / CONFIG.GRID_COLS;
+this.uvOffsetY = 1 - (gridY + 1) / CONFIG.GRID_ROWS;
 
-    this.floatPhase = Math.random() * Math.PI * 2;
-    this.floatSpeed = 0.3 + Math.random() * 0.4;
-    this.floatAmp = 0.04 + Math.random() * 0.06;
+this.uvScaleX = 1 / CONFIG.GRID_COLS;
+this.uvScaleY = 1 / CONFIG.GRID_ROWS;
 
-    this.mesh = this.buildMesh();
-    this.mesh.position.copy(this.pos);
-    this.mesh.rotation.copy(this.rot);
+// No idle floating
+this.floatPhase = 0;
+this.floatSpeed = 0;
+this.floatAmp = 0;
+
+this.mesh = this.buildMesh();
+this.mesh.position.copy(this.pos);
+this.mesh.rotation.copy(this.rot);
   }
 
   buildMesh() {
-    const geo = new THREE.PlaneGeometry(this.width, this.height, 1, 1);
+ const geo = new THREE.PlaneGeometry(this.width, this.height);
 
-    const uvAttr = geo.attributes.uv;
-    for (let i = 0; i < uvAttr.count; i++) {
-      const u = uvAttr.getX(i);
-      const v = uvAttr.getY(i);
-      uvAttr.setXY(i, this.uvOffsetX + u * this.uvScale, this.uvOffsetY + v * this.uvScale);
-    }
-    uvAttr.needsUpdate = true;
+const uvAttr = geo.attributes.uv;
+
+for (let i = 0; i < uvAttr.count; i++) {
+    const u = uvAttr.getX(i);
+    const v = uvAttr.getY(i);
+
+    uvAttr.setXY(
+        i,
+        this.uvOffsetX + u * this.uvScaleX,
+        this.uvOffsetY + v * this.uvScaleY
+    );
+}
+
+uvAttr.needsUpdate = true;
 
     const mat = new THREE.MeshPhysicalMaterial({
       map: videoTexture,
-      roughness: 0.28,
-      metalness: 0.08,
-      clearcoat: 0.6,
-      clearcoatRoughness: 0.25,
-      reflectivity: 0.5,
-      envMapIntensity: 0.8,
       side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.98,
     });
 
     const mesh = new THREE.Mesh(geo, mat);
