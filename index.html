@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Floating Wall — Hand fields</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div id="stage">
+    <!-- Live webcam feed, fills viewport, visible behind tiles -->
+    <video id="webcam" autoplay playsinline muted></video>
+
+    <!-- Hidden capture canvas used to sample webcam pixels for tile textures -->
+    <canvas id="captureCanvas"></canvas>
+
+    <!-- Three.js render target -->
+    <canvas id="glCanvas"></canvas>
+
+    <!-- HUD -->
+    <div id="hud">
+      <div class="hud-row">
+        <span class="hud-label">FLOATING WALL</span>
+        <span class="hud-sub">hand field</span>
+      </div>
+      <div class="hud-row hud-status">
+        <span id="handStatus" class="dot dot-off"></span>
+        <span id="handStatusText">tracking loading…</span>
+      </div>
+      <div class="hud-row hud-keys">
+        <span><kbd>R</kbd> randomize</span>
+        <span><kbd>Space</kbd> explode</span>
+      </div>
+    </div>
+
+    <!-- Loading overlay: only blocks until webcam frame is visible -->
+    <div id="loader">
+      <div class="loader-inner">
+        <div class="loader-ring"></div>
+        <div class="loader-text" id="loaderText">requesting camera access</div>
+      </div>
+    </div>
+
+    <!-- Non-blocking warning banner (e.g. hand tracking failed/slow) -->
+    <div id="warningBanner" class="hidden"></div>
+
+    <!-- Dev-mode error log panel -->
+    <div id="errorPanel" class="hidden"></div>
+
+    <div id="permissionError" class="hidden">
+      <div class="perm-box">
+        <div class="perm-title">Camera access required</div>
+        <div class="perm-body" id="permErrorBody">Allow camera access to enter the floating wall.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import map: pin Three.js core + matching addon versions from the same build -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <!-- MediaPipe Hands (classic globals — no ESM build available) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <script type="module" src="script.js"></script>
+</body>
+</html>
