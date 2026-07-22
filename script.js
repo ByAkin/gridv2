@@ -226,28 +226,14 @@ class Tile {
     this.pos = this.home.clone();
     this.vel = new THREE.Vector3();
 
-    this.homeRot = new THREE.Euler(
-      (Math.random() - 0.5) * 0.5,
-      (Math.random() - 0.5) * 0.6,
-      (Math.random() - 0.5) * 0.35
-    );
-    this.rot = new THREE.Euler().copy(this.homeRot);
-    this.rotVel = new THREE.Vector3();
+   // Every tile starts perfectly flat
+this.homeRot = new THREE.Euler(0, 0, 0);
+this.rot = new THREE.Euler().copy(this.homeRot);
+this.rotVel = new THREE.Vector3();
 
-    const sizeRoll = Math.random();
-    let w, h;
-    if (sizeRoll < 0.28) {
-      w = 0.18 + Math.random() * 0.22;
-      h = 0.9 + Math.random() * 1.6;
-    } else if (sizeRoll < 0.55) {
-      w = 0.9 + Math.random() * 1.3;
-      h = 0.35 + Math.random() * 0.35;
-    } else {
-      w = 0.55 + Math.random() * 0.85;
-      h = 0.55 + Math.random() * 0.85;
-    }
-    this.width = w;
-    this.height = h;
+// Every tile is the same size
+this.width = cellW;
+this.height = cellH;
 
 // Each tile displays its own part of the webcam
 this.uvOffsetX = gridX / CONFIG.GRID_COLS;
