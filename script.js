@@ -121,11 +121,8 @@ let videoTexture;
 const tiles = [];
 
 function initThree() {
-  renderer = new THREE.WebGLRenderer({
-    canvas: glCanvas,
-    antialias: true,
-    alpha: true,
-    powerPreference: 'high-performance',
+   const ambient = new THREE.AmbientLight(0xffffff, 1);
+scene.add(ambient);
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
