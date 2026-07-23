@@ -140,9 +140,6 @@ function initThree() {
   camera.position.set(0, 0, 14);
   camera.lookAt(0, 0, 0);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.55);
-  scene.add(ambient);
-
   const key = new THREE.DirectionalLight(0xffffff, 1.0);
   key.position.set(5, 8, 10);
   key.castShadow = true;
@@ -297,7 +294,7 @@ uvAttr.needsUpdate = true;
     out.z += (dz / dist) * pushMag * 0.6 + eased * strength * 0.5;
   }
 
-  update(dt, handPoints, explodeForce) {
+  update(dt, handPoints) {
 
     const targetX = this.home.x;
     const targetY = this.home.y;
@@ -314,16 +311,6 @@ uvAttr.needsUpdate = true;
           this.applyPointForce(handPoints.fingers[i], CONFIG.FINGER_RADIUS, CONFIG.FINGER_STRENGTH, force);
         }
       }
-    }
-
-    if (explodeForce > 0.0001) {
-      const dirX = this.home.x || (Math.random() - 0.5);
-      const dirY = this.home.y || (Math.random() - 0.5);
-      const dirZ = this.home.z || (Math.random() - 0.5);
-      const len = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ) || 1;
-      force.x += (dirX / len) * explodeForce;
-      force.y += (dirY / len) * explodeForce;
-      force.z += (dirZ / len) * explodeForce * 0.7;
     }
 
     const desiredX = targetX + force.x;
@@ -416,18 +403,6 @@ function buildWallProgressively(onComplete) {
   }
 
   addBatch();
-}
-
-
-// ---------------------------------------------------------------------
-// EXPLODE / REGROUP
-// ---------------------------------------------------------------------
-let explodeAmount = 0;
-let exploding = false;
-
-function triggerExplode() {
-  exploding = true;
-  explodeAmount = 6.5;
 }
 
 // ---------------------------------------------------------------------
@@ -628,22 +603,13 @@ function animate(now) {
   const dt = Math.min((now - lastFrameTime) / 1000, 0.05);
   lastFrameTime = now;
   state.time += dt;
-
-  updateHandTimeout();
-
-  if (exploding) {
-    explodeAmount *= 0.92;
-    if (explodeAmount < 0.01) {
-      explodeAmount = 0;
-      exploding = false;
-    }
   }
 
   const handPoints = state.handActive ? state.handTracking : null;
 
-  for (let i = 0; i < tiles.length; i++) {
-    tiles[i].update(dt, handPoints, explodeAmount);
-  }
+for (let i = 0; i < tiles.length; i++) {
+    tiles[i].update(dt, handPoints);
+}
 
   if (videoTexture) videoTexture.needsUpdate = true;
 
@@ -664,14 +630,6 @@ function startAnimationLoopOnce() {
 // INPUT
 // ---------------------------------------------------------------------
 function initControls() {
-  window.addEventListener('keydown', (e) => {
-    if (e.code === 'KeyR') {
-      randomizeLayout();
-    } else if (e.code === 'Space') {
-      e.preventDefault();
-      triggerExplode();
-    }
-  });
 }
 
 // ---------------------------------------------------------------------
