@@ -1,12 +1,11 @@
 /* =========================================================================
-   FLOATING WALL — HAND FIELD
+   WEBCAM HAND-REACTIVE GRID
    Vanilla JS + Three.js (ES modules) + MediaPipe Hands
+   Idle: seamless webcam grid, zero motion.
+   Hand present: only tiles under the hand's bounding box lift/rotate/separate.
    ========================================================================= */
 
 import * as THREE from 'three';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
 const DEV_MODE = true; // shows on-screen error panel; set false for production
 
@@ -14,26 +13,24 @@ const DEV_MODE = true; // shows on-screen error panel; set false for production
 // CONFIG
 // ---------------------------------------------------------------------
 const CONFIG = {
-  TILE_COUNT: 190,
   GRID_COLS: 16,
   GRID_ROWS: 12,
   WALL_WIDTH: 20,
   WALL_HEIGHT: 13,
-  DEPTH_RANGE: 3.2,
-  FIELD_RADIUS: 3.4,
-  FIELD_STRENGTH: 3.4,
-  FINGER_RADIUS: 1.6,
-  FINGER_STRENGTH: 2.2,
-  SPRING_STIFFNESS: 0.055,
-  SPRING_DAMPING: 0.82,
-  ROT_SPRING_STIFFNESS: 0.06,
-  ROT_SPRING_DAMPING: 0.80,
-  BLOOM_STRENGTH: 0.55,
-  BLOOM_RADIUS: 0.4,
-  BLOOM_THRESHOLD: 0.55,
+
+  // Hand-region interaction
+  HAND_PADDING: 1.2,        // world units padded around the hand bbox
+  LIFT_Z: 1.6,               // how far touched tiles move toward camera
+  MAX_ROT: 0.22,             // radians, max tilt for touched tiles
+  SEPARATION: 0.06,          // extra spacing scale applied to touched tiles
+
+  // Spring motion
+  SPRING_STIFFNESS: 0.16,
+  SPRING_DAMPING: 0.72,
+  ROT_SPRING_STIFFNESS: 0.16,
+  ROT_SPRING_DAMPING: 0.72,
+
   SMOOTHING: 0.45,
-  TILES_PER_BATCH: 20,       // progressive creation batch size
-  BATCH_INTERVAL_MS: 40,     // spacing between batches so frame rate stays smooth
   HAND_TRACKING_TIMEOUT_MS: 10000,
 };
 
@@ -55,7 +52,7 @@ const glCanvas = document.getElementById('glCanvas');
 // ERROR / WARNING UI HELPERS
 // ---------------------------------------------------------------------
 function logError(context, err) {
-  console.error(`[FloatingWall] ${context}:`, err);
+  console.error(`[HandGrid] ${context}:`, err);
   if (!DEV_MODE) return;
   errorPanelEl.classList.remove('hidden');
   const title = errorPanelEl.querySelector('.err-title');
@@ -115,21 +112,20 @@ const state = {
 // ---------------------------------------------------------------------
 // THREE.JS SETUP
 // ---------------------------------------------------------------------
-let renderer, scene, camera, composer;
+let renderer, scene, camera;
 let tileGroup;
 let videoTexture;
 const tiles = [];
 
 function initThree() {
-   const ambient = new THREE.AmbientLight(0xffffff, 1);
-scene.add(ambient);
+  renderer = new THREE.WebGLRenderer({
+    canvas: glCanvas,
+    antialias: true,
+    alpha: true,
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setClearColor(0x000000, 0);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   scene = new THREE.Scene();
 
@@ -137,48 +133,13 @@ scene.add(ambient);
   camera.position.set(0, 0, 14);
   camera.lookAt(0, 0, 0);
 
-  const key = new THREE.DirectionalLight(0xffffff, 1.0);
-  key.position.set(5, 8, 10);
-  key.castShadow = true;
-  key.shadow.mapSize.set(1024, 1024);
-  key.shadow.camera.left = -12;
-  key.shadow.camera.right = 12;
-  key.shadow.camera.top = 12;
-  key.shadow.camera.bottom = -12;
-  key.shadow.camera.near = 1;
-  key.shadow.camera.far = 30;
-  key.shadow.bias = -0.001;
-  scene.add(key);
-
-  const rim = new THREE.DirectionalLight(0x8fb8ff, 0.35);
-  rim.position.set(-8, -4, -6);
-  scene.add(rim);
-
-  const fill = new THREE.PointLight(0xffffff, 0.4, 30);
-  fill.position.set(0, 0, 8);
-  scene.add(fill);
-
-  const shadowPlaneGeo = new THREE.PlaneGeometry(40, 30);
-  const shadowPlaneMat = new THREE.ShadowMaterial({ opacity: 0.18 });
-  const shadowPlane = new THREE.Mesh(shadowPlaneGeo, shadowPlaneMat);
-  shadowPlane.position.z = -CONFIG.DEPTH_RANGE - 1.5;
-  shadowPlane.receiveShadow = true;
-  scene.add(shadowPlane);
+  // Minimal flat lighting — MeshBasicMaterial doesn't need it, but kept
+  // negligible ambient in case any future non-basic elements are added.
+  const ambient = new THREE.AmbientLight(0xffffff, 1);
+  scene.add(ambient);
 
   tileGroup = new THREE.Group();
   scene.add(tileGroup);
-
-  // Postprocessing — correct ES module composer/pass classes for this Three.js version
-  composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPass(scene, camera));
-
-  const bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(window.innerWidth, window.innerHeight),
-    CONFIG.BLOOM_STRENGTH,
-    CONFIG.BLOOM_RADIUS,
-    CONFIG.BLOOM_THRESHOLD
-  );
-  composer.addPass(bloomPass);
 
   window.addEventListener('resize', onResize);
 }
@@ -189,7 +150,6 @@ function onResize() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
-  composer.setSize(w, h);
 }
 
 function initVideoTexture() {
@@ -203,116 +163,102 @@ function initVideoTexture() {
 }
 
 // ---------------------------------------------------------------------
-// TILE CLASS
+// TILE CLASS — fixed grid cell, no randomness, moves only when touched
 // ---------------------------------------------------------------------
 class Tile {
-  constructor(index, gridX, gridY) {
-    this.index = index;
+  constructor(gridX, gridY) {
+    this.gridX = gridX;
+    this.gridY = gridY;
 
     const cellW = CONFIG.WALL_WIDTH / CONFIG.GRID_COLS;
     const cellH = CONFIG.WALL_HEIGHT / CONFIG.GRID_ROWS;
 
-   const homeX = (gridX - CONFIG.GRID_COLS / 2 + 0.5) * cellW;
-   const homeY = (gridY - CONFIG.GRID_ROWS / 2 + 0.5) * cellH;
-   const homeZ = 0;
+    const homeX = (gridX - CONFIG.GRID_COLS / 2 + 0.5) * cellW;
+    const homeY = (gridY - CONFIG.GRID_ROWS / 2 + 0.5) * cellH;
+    const homeZ = 0;
 
     this.home = new THREE.Vector3(homeX, homeY, homeZ);
     this.pos = this.home.clone();
     this.vel = new THREE.Vector3();
 
-   // Every tile starts perfectly flat
-this.homeRot = new THREE.Euler(0, 0, 0);
-this.rot = new THREE.Euler().copy(this.homeRot);
-this.rotVel = new THREE.Vector3();
+    this.homeRot = new THREE.Euler(0, 0, 0);
+    this.rot = new THREE.Euler(0, 0, 0);
+    this.rotVel = new THREE.Vector3();
 
-// Every tile is the same size
-this.width = cellW;
-this.height = cellH;
+    this.width = cellW;
+    this.height = cellH;
 
-// Each tile displays its own part of the webcam
-this.uvOffsetX = gridX / CONFIG.GRID_COLS;
-this.uvOffsetY = 1 - (gridY + 1) / CONFIG.GRID_ROWS;
+    // Each tile samples exactly its own webcam region — seamless mosaic.
+    const cols = CONFIG.GRID_COLS;
+    const rows = CONFIG.GRID_ROWS;
+    this.uvOffsetX = gridX / cols;
+    this.uvOffsetY = 1 - (gridY + 1) / rows;
+    this.uvScaleX = 1 / cols;
+    this.uvScaleY = 1 / rows;
 
-this.uvScaleX = 1 / CONFIG.GRID_COLS;
-this.uvScaleY = 1 / CONFIG.GRID_ROWS;
+    // Reused scratch vectors to avoid per-frame allocations.
+    this._desired = new THREE.Vector3();
+    this._dispX = 0;
+    this._dispY = 0;
 
-// No idle floating
-this.floatPhase = 0;
-this.floatSpeed = 0;
-this.floatAmp = 0;
-
-this.mesh = this.buildMesh();
-this.mesh.position.copy(this.pos);
-this.mesh.rotation.copy(this.rot);
+    this.mesh = this.buildMesh();
+    this.mesh.position.copy(this.pos);
+    this.mesh.rotation.copy(this.rot);
   }
 
   buildMesh() {
- const geo = new THREE.PlaneGeometry(this.width, this.height);
+    const geo = new THREE.PlaneGeometry(this.width, this.height);
 
-const uvAttr = geo.attributes.uv;
-
-for (let i = 0; i < uvAttr.count; i++) {
-    const u = uvAttr.getX(i);
-    const v = uvAttr.getY(i);
-
-    uvAttr.setXY(
+    const uvAttr = geo.attributes.uv;
+    for (let i = 0; i < uvAttr.count; i++) {
+      const u = uvAttr.getX(i);
+      const v = uvAttr.getY(i);
+      uvAttr.setXY(
         i,
         this.uvOffsetX + u * this.uvScaleX,
         this.uvOffsetY + v * this.uvScaleY
-    );
-}
-
-uvAttr.needsUpdate = true;
+      );
+    }
+    uvAttr.needsUpdate = true;
 
     const mat = new THREE.MeshBasicMaterial({
-     map: videoTexture,
-     side: THREE.DoubleSide,
-   });
+      map: videoTexture,
+      side: THREE.DoubleSide,
+    });
 
-    const mesh = new THREE.Mesh(geo, mat);
-    return mesh;
+    return new THREE.Mesh(geo, mat);
   }
 
-  applyPointForce(point, radius, strength, out) {
-    const dx = this.pos.x - point.x;
-    const dy = this.pos.y - point.y;
-    const dz = this.pos.z - point.z;
-    const distSq = dx * dx + dy * dy + dz * dz;
-    const r = radius;
-    if (distSq > r * r) return;
+  // handBox: {minX,maxX,minY,maxY,cx,cy} in world space, or null
+  update(handBox) {
+    let desiredX = this.home.x;
+    let desiredY = this.home.y;
+    let desiredZ = this.home.z;
+    let targetRotX = 0;
+    let targetRotY = 0;
 
-    const dist = Math.sqrt(distSq) || 0.0001;
-    const falloff = 1.0 - dist / r;
-    const eased = falloff * falloff * (3 - 2 * falloff);
-    const pushMag = eased * strength;
+    if (handBox) {
+      const inside =
+        this.home.x >= handBox.minX &&
+        this.home.x <= handBox.maxX &&
+        this.home.y >= handBox.minY &&
+        this.home.y <= handBox.maxY;
 
-    out.x += (dx / dist) * pushMag;
-    out.y += (dy / dist) * pushMag;
-    out.z += (dz / dist) * pushMag * 0.6 + eased * strength * 0.5;
-  }
+      if (inside) {
+        // Normalized position within the hand box, -1..1 on each axis.
+        const halfW = (handBox.maxX - handBox.minX) * 0.5 || 1;
+        const halfH = (handBox.maxY - handBox.minY) * 0.5 || 1;
+        const nx = (this.home.x - handBox.cx) / halfW;
+        const ny = (this.home.y - handBox.cy) / halfH;
 
-  update(dt, handPoints) {
+        desiredZ = this.home.z + CONFIG.LIFT_Z;
+        desiredX = this.home.x + nx * CONFIG.SEPARATION;
+        desiredY = this.home.y + ny * CONFIG.SEPARATION;
 
-    const targetX = this.home.x;
-    const targetY = this.home.y;
-    const targetZ = this.home.z;
-
-    const force = { x: 0, y: 0, z: 0 };
-
-    if (handPoints) {
-      if (handPoints.palm) {
-        this.applyPointForce(handPoints.palm, CONFIG.FIELD_RADIUS, CONFIG.FIELD_STRENGTH, force);
-      }
-      if (handPoints.fingers) {
-        for (let i = 0; i < handPoints.fingers.length; i++) {
-          this.applyPointForce(handPoints.fingers[i], CONFIG.FINGER_RADIUS, CONFIG.FINGER_STRENGTH, force);
-        }
+        targetRotX = -ny * CONFIG.MAX_ROT;
+        targetRotY = nx * CONFIG.MAX_ROT;
       }
     }
-
-    const desiredX = targetX + force.x;
-    const desiredY = targetY + force.y;
-    const desiredZ = targetZ + force.z;
 
     const ax = (desiredX - this.pos.x) * CONFIG.SPRING_STIFFNESS;
     const ay = (desiredY - this.pos.y) * CONFIG.SPRING_STIFFNESS;
@@ -326,40 +272,30 @@ uvAttr.needsUpdate = true;
     this.pos.y += this.vel.y;
     this.pos.z += this.vel.z;
 
-    const dispX = this.pos.x - this.home.x;
-    const dispY = this.pos.y - this.home.y;
-    const dispZ = this.pos.z - this.home.z;
-    const dispMag = Math.sqrt(dispX * dispX + dispY * dispY + dispZ * dispZ);
-
-   const targetRotX = this.homeRot.x + dispY * 0.12;
-   const targetRotY = this.homeRot.y - dispX * 0.12;
-   const targetRotZ = 0;
-
     const rax = (targetRotX - this.rot.x) * CONFIG.ROT_SPRING_STIFFNESS;
     const ray = (targetRotY - this.rot.y) * CONFIG.ROT_SPRING_STIFFNESS;
-    const raz = (targetRotZ - this.rot.z) * CONFIG.ROT_SPRING_STIFFNESS;
 
     this.rotVel.x = (this.rotVel.x + rax) * CONFIG.ROT_SPRING_DAMPING;
     this.rotVel.y = (this.rotVel.y + ray) * CONFIG.ROT_SPRING_DAMPING;
-    this.rotVel.z = (this.rotVel.z + raz) * CONFIG.ROT_SPRING_DAMPING;
 
     this.rot.x += this.rotVel.x;
     this.rot.y += this.rotVel.y;
-    this.rot.z += this.rotVel.z;
 
     this.mesh.position.set(this.pos.x, this.pos.y, this.pos.z);
-    this.mesh.rotation.set(this.rot.x, this.rot.y, this.rot.z);
-
-    const proximity = Math.min(dispMag / 2.5, 1);
+    this.mesh.rotation.set(this.rot.x, this.rot.y, 0);
   }
 }
 
 // ---------------------------------------------------------------------
-// PROGRESSIVE WALL BUILD — avoids a large synchronous stall on startup
+// PROGRESSIVE WALL BUILD — avoids a large synchronous stall on startup.
+// Builds the FULL fixed grid (every cell), in row-major order, so the
+// mosaic always fills in as a seamless rectangle rather than at random.
 // ---------------------------------------------------------------------
 let wallCells = [];
 let wallBuildIndex = 0;
 let wallBuildTimer = null;
+const TILES_PER_BATCH = 24;
+const BATCH_INTERVAL_MS = 16;
 
 function prepareWallCells() {
   const cols = CONFIG.GRID_COLS;
@@ -368,11 +304,7 @@ function prepareWallCells() {
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) cells.push([x, y]);
   }
-  for (let i = cells.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [cells[i], cells[j]] = [cells[j], cells[i]];
-  }
-  wallCells = cells.slice(0, Math.min(CONFIG.TILE_COUNT, cells.length));
+  wallCells = cells;
   wallBuildIndex = 0;
 }
 
@@ -381,10 +313,10 @@ function buildWallProgressively(onComplete) {
 
   function addBatch() {
     try {
-      const end = Math.min(wallBuildIndex + CONFIG.TILES_PER_BATCH, wallCells.length);
+      const end = Math.min(wallBuildIndex + TILES_PER_BATCH, wallCells.length);
       for (; wallBuildIndex < end; wallBuildIndex++) {
         const [gx, gy] = wallCells[wallBuildIndex];
-        const tile = new Tile(wallBuildIndex, gx, gy);
+        const tile = new Tile(gx, gy);
         tiles.push(tile);
         tileGroup.add(tile.mesh);
       }
@@ -393,7 +325,7 @@ function buildWallProgressively(onComplete) {
     }
 
     if (wallBuildIndex < wallCells.length) {
-      wallBuildTimer = setTimeout(addBatch, CONFIG.BATCH_INTERVAL_MS);
+      wallBuildTimer = setTimeout(addBatch, BATCH_INTERVAL_MS);
     } else {
       if (onComplete) onComplete();
     }
@@ -405,11 +337,12 @@ function buildWallProgressively(onComplete) {
 // ---------------------------------------------------------------------
 // COORDINATE MAPPING
 // ---------------------------------------------------------------------
-function normToWorld(nx, ny, nz) {
+function normToWorld(nx, ny, nz, out) {
   const worldX = (1 - nx - 0.5) * CONFIG.WALL_WIDTH * 1.15;
   const worldY = (0.5 - ny) * CONFIG.WALL_HEIGHT * 1.15;
   const worldZ = (nz || 0) * -8;
-  return new THREE.Vector3(worldX, worldY, worldZ);
+  out.set(worldX, worldY, worldZ);
+  return out;
 }
 
 // ---------------------------------------------------------------------
@@ -419,6 +352,13 @@ let hands, mpCamera;
 const smoothedPalm = new THREE.Vector3();
 const smoothedFingers = [];
 let smoothInit = false;
+
+// Reused scratch objects to avoid per-frame allocations.
+const _scratchWorld = new THREE.Vector3();
+const handBoxState = {
+  active: false,
+  minX: 0, maxX: 0, minY: 0, maxY: 0, cx: 0, cy: 0,
+};
 
 function onHandsResults(results) {
   try {
@@ -437,12 +377,12 @@ function onHandsResults(results) {
     const palmNY = (wrist.y + indexBase.y + pinkyBase.y) / 3;
     const palmNZ = (wrist.z + indexBase.z + pinkyBase.z) / 3;
 
-    const palmWorld = normToWorld(palmNX, palmNY, palmNZ);
+    const palmWorld = normToWorld(palmNX, palmNY, palmNZ, _scratchWorld).clone();
 
     const tipIndices = [4, 8, 12, 16, 20];
     const fingerWorlds = tipIndices.map((idx) => {
       const lm = landmarks[idx];
-      return normToWorld(lm.x, lm.y, lm.z);
+      return normToWorld(lm.x, lm.y, lm.z, _scratchWorld).clone();
     });
 
     if (!smoothInit) {
@@ -456,6 +396,28 @@ function onHandsResults(results) {
         else smoothedFingers[i].lerp(f, CONFIG.SMOOTHING);
       });
     }
+
+    // Bounding box over all landmarks (world space), padded.
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let i = 0; i < landmarks.length; i++) {
+      const w = normToWorld(landmarks[i].x, landmarks[i].y, landmarks[i].z, _scratchWorld);
+      if (w.x < minX) minX = w.x;
+      if (w.x > maxX) maxX = w.x;
+      if (w.y < minY) minY = w.y;
+      if (w.y > maxY) maxY = w.y;
+    }
+    minX -= CONFIG.HAND_PADDING;
+    maxX += CONFIG.HAND_PADDING;
+    minY -= CONFIG.HAND_PADDING;
+    maxY += CONFIG.HAND_PADDING;
+
+    handBoxState.active = true;
+    handBoxState.minX = minX;
+    handBoxState.maxX = maxX;
+    handBoxState.minY = minY;
+    handBoxState.maxY = maxY;
+    handBoxState.cx = (minX + maxX) * 0.5;
+    handBoxState.cy = (minY + maxY) * 0.5;
 
     state.handTracking = { palm: smoothedPalm, fingers: smoothedFingers };
     state.handActive = true;
@@ -475,6 +437,7 @@ function updateHandStatus(active) {
 function updateHandTimeout() {
   if (state.handActive && performance.now() - state.lastHandSeenAt > 350) {
     state.handActive = false;
+    handBoxState.active = false;
     updateHandStatus(false);
   }
 }
@@ -603,10 +566,10 @@ function animate(now) {
 
   updateHandTimeout();
 
-  const handPoints = state.handActive ? state.handTracking : null;
+  const activeHandBox = (state.handActive && handBoxState.active) ? handBoxState : null;
 
   for (let i = 0; i < tiles.length; i++) {
-    tiles[i].update(dt, handPoints);
+    tiles[i].update(activeHandBox);
   }
 
   if (videoTexture) {
@@ -614,9 +577,9 @@ function animate(now) {
   }
 
   try {
-    composer.render();
+    renderer.render(scene, camera);
   } catch (err) {
-    logError('composer.render', err);
+    logError('renderer.render', err);
   }
 }
 
@@ -630,6 +593,7 @@ function startAnimationLoopOnce() {
 // INPUT
 // ---------------------------------------------------------------------
 function initControls() {
+  // No keyboard controls, no explode mode — grid reacts to hand only.
 }
 
 // ---------------------------------------------------------------------
