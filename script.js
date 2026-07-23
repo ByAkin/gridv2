@@ -13,10 +13,11 @@ const DEV_MODE = true; // shows on-screen error panel; set false for production
 // CONFIG
 // ---------------------------------------------------------------------
 const CONFIG = {
-  GRID_COLS: 16,
-  GRID_ROWS: 12,
-  WALL_WIDTH: 20,
-  WALL_HEIGHT: 13,
+GRID_COLS: 16,
+GRID_ROWS: 12,
+
+WALL_WIDTH: 20,
+WALL_HEIGHT: 11.25,
 
   // Hand-region interaction
   HAND_PADDING: 1.2,        // world units padded around the hand bbox
@@ -175,7 +176,7 @@ class Tile {
 
     const homeX = (gridX - CONFIG.GRID_COLS / 2 + 0.5) * cellW;
     const homeY = (gridY - CONFIG.GRID_ROWS / 2 + 0.5) * cellH;
-    const homeZ = 0;
+    const homeZ = (this.gridY * CONFIG.GRID_COLS + this.gridX) * 0.00001;
 
     this.home = new THREE.Vector3(homeX, homeY, homeZ);
     this.pos = this.home.clone();
@@ -207,7 +208,9 @@ class Tile {
   }
 
   buildMesh() {
-    const geo = new THREE.PlaneGeometry(this.width, this.height);
+  const geo = new THREE.PlaneGeometry(
+    this.width * 0.98,
+    this.height * 0.98
 
     const uvAttr = geo.attributes.uv;
     for (let i = 0; i < uvAttr.count; i++) {
