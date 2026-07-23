@@ -600,15 +600,18 @@ function animate(now) {
   const dt = Math.min((now - lastFrameTime) / 1000, 0.05);
   lastFrameTime = now;
   state.time += dt;
-  }
+
+  updateHandTimeout();
 
   const handPoints = state.handActive ? state.handTracking : null;
 
-for (let i = 0; i < tiles.length; i++) {
+  for (let i = 0; i < tiles.length; i++) {
     tiles[i].update(dt, handPoints);
-}
+  }
 
-  if (videoTexture) videoTexture.needsUpdate = true;
+  if (videoTexture) {
+    videoTexture.needsUpdate = true;
+  }
 
   try {
     composer.render();
